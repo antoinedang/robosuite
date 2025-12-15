@@ -102,3 +102,41 @@ class PandaDexLH(Panda):
     @property
     def gripper_mount_quat_offset(self):
         return {"right": [0.5, -0.5, 0.5, -0.5]}
+
+class PandaAllegro(Panda):
+    @property
+    def default_base(self):
+        return "OmronMobileBase"
+
+    @property
+    def default_gripper(self):
+        return {"right": "WonikAllegro"}
+
+    @property
+    def gripper_mount_pos_offset(self):
+        return {"right": [0.0, 0.0, 0.1]}
+
+    @property
+    def gripper_mount_quat_offset(self):
+        return {"right": [1.0, 0.0, 0.0, 0.0]}
+
+class fr3Allegro(fr3):
+    @property
+    def default_base(self):
+        return "OmronMobileBase"
+    
+    @property
+    def default_arms(self):
+        return {"right": "fr3"}
+
+    @property
+    def default_gripper(self):
+        return {"right": "WonikAllegro"}
+
+    @property
+    def gripper_mount_pos_offset(self):
+        return {"right": [0.0, 0.0, 0.1]}
+
+    @property
+    def gripper_mount_quat_offset(self):
+        return {"right": [1.0, 0.0 ,0.0 ,0.0]}

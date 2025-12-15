@@ -176,24 +176,24 @@ class Controller(object, metaclass=abc.ABCMeta):
 
     def _update_single_reference(self, name: str, index: int):
         # TODO: remove if statement once we unify the shapes of variables when num_ref_sites == 1 and num_ref_sites > 1
-        ref_id = self.sim.model.site_name2id(name)
+        ref_id = self.sim.model.body_name2id(name)
 
         if self.num_ref_sites == 1:
-            self.ref_pos[:] = np.array(self.sim.data.site_xpos[ref_id])
-            self.ref_ori_mat[:, :] = np.array(self.sim.data.site_xmat[ref_id].reshape([3, 3]))
-            self.ref_pos_vel[:] = np.array(self.sim.data.get_site_xvelp(name))
-            self.ref_ori_vel[:] = np.array(self.sim.data.get_site_xvelr(name))
-            self.J_pos[:, :] = np.array(self.sim.data.get_site_jacp(name).reshape((3, -1))[:, self.qvel_index])
-            self.J_ori[:, :] = np.array(self.sim.data.get_site_jacr(name).reshape((3, -1))[:, self.qvel_index])
+            self.ref_pos[:] = np.array(self.sim.data.body_xpos[ref_id])
+            self.ref_ori_mat[:, :] = np.array(self.sim.data.body_xmat[ref_id].reshape([3, 3]))
+            self.ref_pos_vel[:] = np.array(self.sim.data.get_body_xvelp(name))
+            self.ref_ori_vel[:] = np.array(self.sim.data.get_body_xvelr(name))
+            self.J_pos[:, :] = np.array(self.sim.data.get_body_jacp(name).reshape((3, -1))[:, self.qvel_index])
+            self.J_ori[:, :] = np.array(self.sim.data.get_body_jacr(name).reshape((3, -1))[:, self.qvel_index])
             self.J_full[:, :] = np.vstack([self.J_pos, self.J_ori])
         else:
-            self.ref_pos[index, :] = np.array(self.sim.data.site_xpos[ref_id])
-            self.ref_ori_mat[index, :, :] = np.array(self.sim.data.site_xmat[ref_id].reshape([3, 3]))
-            self.ref_pos_vel[index, :] = np.array(self.sim.data.get_site_xvelp(name))
-            self.ref_ori_vel[index, :] = np.array(self.sim.data.get_site_xvelr(name))
+            self.ref_pos[index, :] = np.array(self.sim.data.body_xpos[ref_id])
+            self.ref_ori_mat[index, :, :] = np.array(self.sim.data.body_xmat[ref_id].reshape([3, 3]))
+            self.ref_pos_vel[index, :] = np.array(self.sim.data.get_body_xvelp(name))
+            self.ref_ori_vel[index, :] = np.array(self.sim.data.get_body_xvelr(name))
 
-            self.J_pos[index, :, :] = np.array(self.sim.data.get_site_jacp(name).reshape((3, -1))[:, self.qvel_index])
-            self.J_ori[index, :, :] = np.array(self.sim.data.get_site_jacr(name).reshape((3, -1))[:, self.qvel_index])
+            self.J_pos[index, :, :] = np.array(self.sim.data.get_body_jacp(name).reshape((3, -1))[:, self.qvel_index])
+            self.J_ori[index, :, :] = np.array(self.sim.data.get_body_jacr(name).reshape((3, -1))[:, self.qvel_index])
             self.J_full[index, :, :] = np.vstack([self.J_pos[index], self.J_ori[index]])
 
     def update(self, force=False):

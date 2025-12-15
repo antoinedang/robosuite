@@ -96,8 +96,8 @@ class MujocoEnv(metaclass=EnvMeta):
         render_camera="frontview",
         render_collision_mesh=False,
         render_visual_mesh=True,
-        render_gpu_device_id=-1,
-        control_freq=20,
+        render_gpu_device_id=0,
+        control_freq=10,
         lite_physics=True,
         horizon=1000,
         ignore_done=False,
@@ -138,7 +138,7 @@ class MujocoEnv(metaclass=EnvMeta):
         self.renderer = renderer
         self.renderer_config = renderer_config
 
-        self.seed = seed
+        self.seed = np.random.seed(17)
         self.rng = np.random.default_rng(seed)
 
         self._ep_meta = {}
@@ -405,6 +405,7 @@ class MujocoEnv(metaclass=EnvMeta):
 
         # Loop through all observables and grab their current observation
         for obs_name, observable in self._observables.items():
+            # breakpoint()
             if observable.is_enabled() and observable.is_active():
                 obs = observable.obs
                 observations[obs_name] = obs

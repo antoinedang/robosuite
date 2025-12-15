@@ -17,13 +17,17 @@ class Robotiq85GripperBase(GripperModel):
 
     def __init__(self, idn=0):
         super().__init__(xml_path_completion("grippers/robotiq_gripper_85.xml"), idn=idn)
+        # Do overwrite
+        self._joints = ["finger_joint", "right_outer_knuckle_joint"]
 
     def format_action(self, action):
         return action
 
     @property
     def init_qpos(self):
-        return np.array([-0.026, -0.267, -0.200, -0.026, -0.267, -0.200])
+        # return np.array([-0.026, -0.267, -0.200, -0.026, -0.267, -0.200])
+        return np.array([-0.026, -0.026])
+
 
     @property
     def _important_geoms(self):
@@ -63,7 +67,7 @@ class Robotiq85Gripper(Robotiq85GripperBase):
         """
         assert len(action) == 1
         self.current_action = np.clip(
-            self.current_action * np.array([1.0, 1.0]) + self.speed * np.sign(action), -1.0, 1.0
+            self.current_action * np.array([1.0]*2) + self.speed * np.sign(action), -1.0, 1.0
         )
         return self.current_action
 

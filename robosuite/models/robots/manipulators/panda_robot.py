@@ -26,7 +26,9 @@ class Panda(ManipulatorModel):
 
     @property
     def default_gripper(self):
-        return {"right": "PandaGripper"}
+        #<position name='finger_1' ctrllimited="true" kp="20" joint='finger_joint' ctrlrange='0 0.8'/>
+        #<position name='finger_2' ctrllimited="true" kp="20" joint='right_outer_knuckle_joint' ctrlrange='0 0.8'/>
+        return {"right": "Robotiq85Gripper"}
 
     @property
     def default_controller_config(self):

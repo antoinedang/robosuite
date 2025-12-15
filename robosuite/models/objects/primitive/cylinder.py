@@ -27,9 +27,8 @@ class CylinderObject(PrimitiveObject):
         joints="default",
         obj_type="all",
         duplicate_collision_geoms=True,
-        rng=None,
     ):
-        size = get_size(size, size_max, size_min, [0.07, 0.07], [0.03, 0.03], rng=rng)
+        size = get_size(size, size_max, size_min, [0.07, 0.07], [0.03, 0.03])
 
         # We override solref, solimp, and joint default values for better stability
         if friction is None:

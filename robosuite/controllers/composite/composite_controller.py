@@ -9,7 +9,7 @@ from robosuite.controllers import controller_factory
 from robosuite.models.grippers.gripper_model import GripperModel
 from robosuite.models.robots.robot_model import RobotModel
 from robosuite.utils.binding_utils import MjSim
-from robosuite.utils.ik_utils import IKSolver, get_nullspace_gains
+from robosuite.utils.ik_utils import get_nullspace_gains, IKSolver
 from robosuite.utils.log_utils import ROBOSUITE_DEFAULT_LOGGER
 
 REGISTERED_COMPOSITE_CONTROLLERS_DICT = {}
@@ -51,7 +51,9 @@ class CompositeController:
         self._applied_action_dict = {}
 
     def load_controller_config(
-        self, part_controller_config, composite_controller_specific_config: Optional[Dict] = None
+        self,
+        part_controller_config,
+        composite_controller_specific_config: Optional[Dict] = None,
     ):
         self.composite_controller_specific_config = composite_controller_specific_config
         body_part_ordering = self.composite_controller_specific_config.get("body_part_ordering", None)
@@ -98,9 +100,22 @@ class CompositeController:
         for part_name, controller in self.part_controllers.items():
             start_idx, end_idx = self._action_split_indexes[part_name]
             action = all_action[start_idx:end_idx]
+            if part_name == "right":
+                if self.part_controllers["right"].name == "JOINT_POSITION":
+                    controller.set_goal(np.zeros(7), set_qpos=action)
+                else:
+                    controller.set_goal(action)
+
             if part_name in self.grippers.keys():
                 action = self.grippers[part_name].format_action(action)
-            controller.set_goal(action)
+                controller.set_goal(np.zeros(16), set_qpos=action)
+            else:
+                # enable left controller
+                if part_name == "left":
+                    controller.set_goal(action)
+                if part_name == "base":
+                    controller.set_goal(action)
+                # controller.set_goal(action)
 
     def reset(self):
         for part_name, controller in self.part_controllers.items():
@@ -111,6 +126,7 @@ class CompositeController:
         self._applied_action_dict.clear()
         for part_name, controller in self.part_controllers.items():
             if enabled_parts.get(part_name, False):
+
                 self._applied_action_dict[part_name] = controller.run_controller()
 
         return self._applied_action_dict
@@ -122,23 +138,6 @@ class CompositeController:
             return self.part_controllers[part_name].control_dim
 
     def get_controller_base_pose(self, controller_name):
-        """
-        Get the base position and orientation of a specified controller's part. Note: this pose may likely differ from
-        the robot base's pose.
-
-        Args:
-            controller_name (str): The name of the controller, used to look up part-specific information.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - base_pos (np.ndarray): The 3D position of the part's center in world coordinates (shape: (3,)).
-                - base_ori (np.ndarray): The 3x3 rotation matrix representing the part's orientation in world coordinates.
-
-        Details:
-            - Uses the controller's `naming_prefix` and `part_name` to construct the corresponding site name.
-            - Queries the simulation (`self.sim`) for the site's position (`site_xpos`) and orientation (`site_xmat`).
-            - The site orientation matrix is reshaped from a flat array of size 9 to a 3x3 rotation matrix.
-        """
         naming_prefix = self.part_controllers[controller_name].naming_prefix
         part_name = self.part_controllers[controller_name].part_name
         base_pos = np.array(self.sim.data.site_xpos[self.sim.model.site_name2id(f"{naming_prefix}{part_name}_center")])
@@ -157,11 +156,15 @@ class CompositeController:
 
     @property
     def action_limits(self):
-        low, high = [], []
+        low, high, mid = [], [], []
         for part_name, controller in self.part_controllers.items():
             if part_name not in self.arms:
                 if part_name in self.grippers.keys():
-                    low_g, high_g = ([-1] * self.grippers[part_name].dof, [1] * self.grippers[part_name].dof)
+                    low_g, high_g, mid_g = (
+                        [-1] * self.grippers[part_name].dof,
+                        [1] * self.grippers[part_name].dof,
+                        [0.5] * self.grippers[part_name].dof,
+                    )
                     low, high = np.concatenate([low, low_g]), np.concatenate([high, high_g])
                 else:
                     control_dim = controller.control_dim
@@ -217,7 +220,7 @@ class HybridMobileBase(CompositeController):
         A helper function that creates the action vector given a dictionary
         """
         full_action_vector = np.zeros(self.action_limits[0].shape)
-        for (part_name, action_vector) in action_dict.items():
+        for part_name, action_vector in action_dict.items():
             if part_name not in self._action_split_indexes:
                 ROBOSUITE_DEFAULT_LOGGER.debug(f"{part_name} is not specified in the action space")
                 continue
@@ -319,7 +322,10 @@ class WholeBody(CompositeController):
                 last_idx += self.grippers[part_name].dof
             else:
                 last_idx += controller.control_dim
-            self._whole_body_controller_action_split_indexes[part_name] = (previous_idx, last_idx)
+            self._whole_body_controller_action_split_indexes[part_name] = (
+                previous_idx,
+                last_idx,
+            )
             previous_idx = last_idx
 
     def set_goal(self, all_action):
@@ -331,6 +337,10 @@ class WholeBody(CompositeController):
             action = all_action[start_idx:end_idx]
             if part_name in self.grippers.keys():
                 action = self.grippers[part_name].format_action(action)
+                controller.set_goal(np.zeros(16), set_qpos=action)
+            else:
+                if part_name == "left":
+                    continue
             controller.set_goal(action)
 
     def update_state(self):
@@ -353,7 +363,10 @@ class WholeBody(CompositeController):
                 continue
             if part_name not in self.arms:
                 if part_name in self.grippers.keys():
-                    low_g, high_g = ([-1] * self.grippers[part_name].dof, [1] * self.grippers[part_name].dof)
+                    low_g, high_g = (
+                        [-1] * self.grippers[part_name].dof,
+                        [1] * self.grippers[part_name].dof,
+                    )
                     low, high = np.concatenate([low, low_g]), np.concatenate([high, high_g])
                 else:
                     control_dim = controller.control_dim
@@ -366,7 +379,7 @@ class WholeBody(CompositeController):
 
     def create_action_vector(self, action_dict: Dict[str, np.ndarray]) -> np.ndarray:
         full_action_vector = np.zeros(self.action_limits[0].shape)
-        for (part_name, action_vector) in action_dict.items():
+        for part_name, action_vector in action_dict.items():
             if part_name not in self._whole_body_controller_action_split_indexes:
                 ROBOSUITE_DEFAULT_LOGGER.debug(f"{part_name} is not specified in the action space")
                 continue
@@ -383,7 +396,10 @@ class WholeBody(CompositeController):
     def print_action_info(self):
         action_index_info = []
         action_dim_info = []
-        for part_name, (start_idx, end_idx) in self._whole_body_controller_action_split_indexes.items():
+        for part_name, (
+            start_idx,
+            end_idx,
+        ) in self._whole_body_controller_action_split_indexes.items():
             action_dim_info.append(f"{part_name}: {(end_idx - start_idx)} dim")
             action_index_info.append(f"{part_name}: {start_idx}:{end_idx}")
 
@@ -456,7 +472,10 @@ class WholeBodyIK(WholeBody):
                 )
 
         # Compute nullspace gains, Kn.
-        Kn = get_nullspace_gains(joint_names, self.composite_controller_specific_config["nullspace_joint_weights"])
+        Kn = get_nullspace_gains(
+            joint_names,
+            self.composite_controller_specific_config["nullspace_joint_weights"],
+        )
         mocap_bodies = []
         robot_config = {
             "end_effector_sites": self.composite_controller_specific_config["ref_name"],
@@ -474,6 +493,5 @@ class WholeBodyIK(WholeBody):
             max_dq_torso=self.composite_controller_specific_config.get("ik_max_dq_torso", 0.2),
             input_rotation_repr=self.composite_controller_specific_config.get("ik_input_rotation_repr", "axis_angle"),
             input_type=self.composite_controller_specific_config.get("ik_input_type", "axis_angle"),
-            input_ref_frame=self.composite_controller_specific_config.get("ik_input_ref_frame", "world"),
             debug=self.composite_controller_specific_config.get("verbose", False),
         )
