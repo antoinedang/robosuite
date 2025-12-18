@@ -450,12 +450,6 @@ class RobotEnv(MujocoEnv):
                 height=cam_h,
                 depth=cam_d,
             )
-            # from PIL import Image
-
-            # pil_image = Image.fromarray(img[0])
-            # pil_image.save(f"output_image_{cam_name}.png")
-            # print(cam_name)
-            # breakpoint()
             if cam_d:
                 rgb, depth = img
                 if "rightview" in cam_name:

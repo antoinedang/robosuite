@@ -14,7 +14,6 @@ BASE_TARGET_MAPPING = {
     "NoActuationBase": "LeggedRobot",
     "Spot": "LeggedRobot",
     "SpotFloating": "LeggedRobot",
-    "MURP":"WheeledRobot",
 }
 
 

@@ -138,7 +138,6 @@ class OperationalSpaceController(Controller):
         lite_physics=True,
         **kwargs,  # does nothing; used so no error raised when dict is passed with extra terms used previously
     ):
-        print(f"{input_type=}, {input_ref_frame=}")
         super().__init__(
             sim,
             ref_name=ref_name,
@@ -400,9 +399,6 @@ class OperationalSpaceController(Controller):
             raise ValueError
 
         # check for orientation limits
-        # if np.array(self.orientation_limits).any():
-            # to be implemented later
-            # raise NotImplementedError
         if self.orientation_limits is not None:
             delta_clipped =  np.clip(delta,self.orientation_limits[0],self.orientation_limits[1])
             quat_err= T.axisangle2quat(delta_clipped)
@@ -519,7 +515,6 @@ class OperationalSpaceController(Controller):
         )
 
         # Clip torques to actuator limits
-        # Clip torques to actuator limits
         joint_min_limits = np.array([-2.7437, -1.7837, -2.9007, -3.0421, -2.8065, 0.5445, -3.0159])
         joint_max_limits = np.array([2.743, 1.7837, 2.9007, -0.151, 2.8065, 4.5169, 3.0159])
 
@@ -529,20 +524,6 @@ class OperationalSpaceController(Controller):
         damping_factor = 0.1  # Small corrective force to apply when hitting limits
 
         joint_positions = self.joint_pos + self.joint_vel * (1 / self.control_freq)  
-        # for i in range(len(joint_positions)):
-        #     # if joint_positions[i] < joint_min_limits[i] and self.joint_vel[i] < 0:
-        #     #     self.torques[i] = damping_factor  # Apply a small corrective force
-        #     # elif joint_positions[i] > joint_max_limits[i] and self.joint_vel[i] > 0:
-        #     #     self.torques[i] = -damping_factor  # Apply a small corrective force
-        #     if joint_positions[i] < joint_min_limits[i] or joint_positions[i] > joint_max_limits[i]:
-        #         # Scale torque smoothly as joint approaches limits
-        #         if joint_positions[i] < joint_min_limits[i]:
-        #             print(f"Joint {i} is below min limit")
-        #             self.torques[i] *= (joint_positions[i] - joint_min_limits[i]) / (self.joint_pos[i] - joint_min_limits[i])
-        #         elif joint_positions[i] > joint_max_limits[i]:
-        #             print(f"Joint {i} is above max limit, hitting singularity")
-        #             self.torques[i] *= (joint_max_limits[i] - joint_positions[i]) / (joint_max_limits[i] - self.joint_pos[i])
-      
         super().run_controller()
 
         return self.torques
