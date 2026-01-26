@@ -24,7 +24,7 @@ class WheeledRobot(MobileRobot):
         initialization_noise=None,
         base_type="default",
         gripper_type="default",
-        control_freq=20,
+        control_freq=10,
         lite_physics=True,
     ):
         super().__init__(
@@ -73,7 +73,7 @@ class WheeledRobot(MobileRobot):
         # First, run the superclass method to load the relevant model
         super().load_model()
 
-    def reset(self, deterministic=False, rng=None):
+    def reset(self, deterministic=False):
         """
         Sets initial pose of arm and grippers. Overrides gripper joint configuration if we're using a
         deterministic reset (e.g.: hard reset from xml file)
@@ -82,7 +82,7 @@ class WheeledRobot(MobileRobot):
             deterministic (bool): If true, will not randomize initializations within the sim
         """
         # First, run the superclass method to reset the position and controller
-        super().reset(deterministic, rng=rng)
+        super().reset(deterministic)
 
     def setup_references(self):
         """
@@ -112,6 +112,7 @@ class WheeledRobot(MobileRobot):
             AssertionError: [Invalid action dimension]
         """
         # clip actions into valid range
+        # breakpoint()
         assert len(action) == self.action_dim, "environment got invalid action dimension -- expected {}, got {}".format(
             self.action_dim, len(action)
         )
@@ -139,22 +140,24 @@ class WheeledRobot(MobileRobot):
                 if controller is None:
                     # TODO: enable buffer update for whole body controllers not using individual arm controllers
                     continue
+                if controller.name == "SIMPLE_POS" or controller.name == "JOINT_POSITION":
+                    continue
+                else:
+                    # Update arm-specific proprioceptive values
+                    self.recent_ee_forcetorques[arm].push(np.concatenate((self.ee_force[arm], self.ee_torque[arm])))
+                    self.recent_ee_pose[arm].push(np.concatenate((controller.ref_pos, T.mat2quat(controller.ref_ori_mat))))
+                    self.recent_ee_vel[arm].push(np.concatenate((controller.ref_pos_vel, controller.ref_ori_vel)))
 
-                # Update arm-specific proprioceptive values
-                self.recent_ee_forcetorques[arm].push(np.concatenate((self.ee_force[arm], self.ee_torque[arm])))
-                self.recent_ee_pose[arm].push(np.concatenate((controller.ref_pos, T.mat2quat(controller.ref_ori_mat))))
-                self.recent_ee_vel[arm].push(np.concatenate((controller.ref_pos_vel, controller.ref_ori_vel)))
-
-                # Estimation of eef acceleration (averaged derivative of recent velocities)
-                self.recent_ee_vel_buffer[arm].push(np.concatenate((controller.ref_pos_vel, controller.ref_ori_vel)))
-                diffs = np.vstack(
-                    [
-                        self.recent_ee_acc[arm].current,
-                        self.control_freq * np.diff(self.recent_ee_vel_buffer[arm].buf, axis=0),
-                    ]
-                )
-                ee_acc = np.array([np.convolve(col, np.ones(10) / 10.0, mode="valid")[0] for col in diffs.transpose()])
-                self.recent_ee_acc[arm].push(ee_acc)
+                    # Estimation of eef acceleration (averaged derivative of recent velocities)
+                    self.recent_ee_vel_buffer[arm].push(np.concatenate((controller.ref_pos_vel, controller.ref_ori_vel)))
+                    diffs = np.vstack(
+                        [
+                            self.recent_ee_acc[arm].current,
+                            self.control_freq * np.diff(self.recent_ee_vel_buffer[arm].buf, axis=0),
+                        ]
+                    )
+                    ee_acc = np.array([np.convolve(col, np.ones(10) / 10.0, mode="valid")[0] for col in diffs.transpose()])
+                    self.recent_ee_acc[arm].push(ee_acc)
 
     def setup_observables(self):
         """
@@ -165,6 +168,7 @@ class WheeledRobot(MobileRobot):
         """
         # Get general robot observables first
         observables = super().setup_observables()
+        # breakpoint()
 
         return observables
 

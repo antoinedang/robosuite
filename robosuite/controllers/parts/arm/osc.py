@@ -6,7 +6,7 @@ from scipy.spatial.transform import Rotation
 import robosuite.utils.transform_utils as T
 from robosuite.controllers.parts.controller import Controller
 from robosuite.utils.control_utils import *
-
+from scipy.spatial.transform import Rotation as R
 # Supported impedance modes
 IMPEDANCE_MODES = {"fixed", "variable", "variable_kp"}
 
@@ -121,12 +121,12 @@ class OperationalSpaceController(Controller):
         input_min=-1,
         output_max=(0.05, 0.05, 0.05, 0.5, 0.5, 0.5),
         output_min=(-0.05, -0.05, -0.05, -0.5, -0.5, -0.5),
-        kp=150,
-        damping_ratio=1,
+        kp=20,
+        damping_ratio=5,
         impedance_mode="fixed",
         kp_limits=(0, 300),
         damping_ratio_limits=(0, 100),
-        policy_freq=20,
+        policy_freq=10,
         position_limits=None,
         orientation_limits=None,
         interpolator_pos=None,
@@ -138,7 +138,6 @@ class OperationalSpaceController(Controller):
         lite_physics=True,
         **kwargs,  # does nothing; used so no error raised when dict is passed with extra terms used previously
     ):
-
         super().__init__(
             sim,
             ref_name=ref_name,
@@ -159,6 +158,7 @@ class OperationalSpaceController(Controller):
         assert self.input_ref_frame in [
             "world",
             "base",
+            "right_base",
         ], f"Input reference frame must be world or base, got: {self.input_ref_frame}"
 
         # Control dimension
@@ -172,8 +172,12 @@ class OperationalSpaceController(Controller):
         self.output_min = self.nums2array(output_min, self.control_dim)
 
         # kp kd
+        
         self.kp = self.nums2array(kp, 6)
+        self.kp[2] *= 2  # increase kp for z control
+        self.kp[3:6] *= 10 # increase kp for orientation control
         self.kd = 2 * np.sqrt(self.kp) * damping_ratio
+        self.kd[2] *= 2  # increase kd for z control
 
         # kp and kd limits
         self.kp_min = self.nums2array(kp_limits[0], 6)
@@ -239,22 +243,20 @@ class OperationalSpaceController(Controller):
         """
         # Update state
         self.update()
-
         # Parse action based on the impedance mode, and update kp / kd as necessary
         if self.impedance_mode == "variable":
-            damping_ratio, kp, goal_update = action[:6], action[6:12], action[12:]
+            damping_ratio, kp, delta = action[:6], action[6:12], action[12:]
             self.kp = np.clip(kp, self.kp_min, self.kp_max)
             self.kd = 2 * np.sqrt(self.kp) * np.clip(damping_ratio, self.damping_ratio_min, self.damping_ratio_max)
         elif self.impedance_mode == "variable_kp":
-            kp, goal_update = action[:6], action[6:]
+            kp, delta = action[:6], action[6:]
             self.kp = np.clip(kp, self.kp_min, self.kp_max)
             self.kd = 2 * np.sqrt(self.kp)  # critically damped
         else:  # This is case "fixed"
-            goal_update = action
+            delta = action
 
         # If we're using deltas, interpret actions as such
         if self.input_type == "delta":
-            delta = goal_update
             scaled_delta = self.scale_action(delta)
             self.goal_pos = self.compute_goal_pos(scaled_delta[0:3])
             if self.use_ori is True:
@@ -263,10 +265,11 @@ class OperationalSpaceController(Controller):
                 self.goal_ori = self.compute_goal_ori(np.zeros(3))
         # Else, interpret actions as absolute values
         elif self.input_type == "absolute":
-            abs_action = goal_update
-            self.goal_pos = abs_action[0:3]
+            self.goal_pos = action[0:3]
             if self.use_ori is True:
-                self.goal_ori = Rotation.from_rotvec(abs_action[3:6]).as_matrix()
+                self.goal_ori = Rotation.from_rotvec(action[3:6]).as_matrix()
+                goal_wuat=R.from_matrix(self.goal_ori).as_quat()
+                # print(f"Goal quat: {goal_wuat},action: {R.from_rotvec(action[3:6]).as_quat()}")
             else:
                 self.goal_ori = self.compute_goal_ori(np.zeros(3))
         else:
@@ -281,6 +284,7 @@ class OperationalSpaceController(Controller):
                 orientation_error(self.goal_ori, self.ori_ref)
             )  # goal is the total orientation error
             self.relative_ori = np.zeros(3)  # relative orientation always starts at 0
+        print("final goal pos: ", self.goal_pos)
 
     def world_to_origin_frame(self, vec):
         """
@@ -395,9 +399,10 @@ class OperationalSpaceController(Controller):
             raise ValueError
 
         # check for orientation limits
-        if np.array(self.orientation_limits).any():
-            # to be implemented later
-            raise NotImplementedError
+        if self.orientation_limits is not None:
+            delta_clipped =  np.clip(delta,self.orientation_limits[0],self.orientation_limits[1])
+            quat_err= T.axisangle2quat(delta_clipped)
+            rotation_mat_error = T.quat2mat(quat_error)
         return goal_ori
 
     def run_controller(self):
@@ -430,6 +435,24 @@ class OperationalSpaceController(Controller):
                 desired_world_pos = self.origin_pos + np.dot(self.origin_ori, self.goal_pos)
             elif self.input_ref_frame == "world":
                 desired_world_pos = self.goal_pos
+            elif self.input_ref_frame == "right_base":
+                
+
+                ee_T_world_pos = self.sim.data.get_body_xpos('robot0_right_hand')
+                ee_T_world_mat= self.sim.data.get_body_xmat('robot0_right_hand')
+                right_base_T_world_pos = self.sim.data.get_site_xpos('robot0_right_base_center')
+                right_base_T_world_mat = self.sim.data.get_site_xmat('robot0_right_base_center')
+                
+                ee_T_right_base_pos= self.goal_pos
+                # breakpoint()
+                ee_T_right_base_ori = self.goal_ori
+                # print("EE T BASE POS", ee_T_right_base_pos)
+                ee_T_right_base = T.make_pose(ee_T_right_base_pos, ee_T_right_base_ori)
+                right_base_T_world=T.make_pose(right_base_T_world_pos, right_base_T_world_mat)
+                # print("RIght_base_T_world", right_base_T_world)
+                ee_T_world =   right_base_T_world @ ee_T_right_base
+                desired_world_pos = ee_T_world[:3,-1]
+                # print("Desired world pos", desired_world_pos)
             else:
                 raise ValueError
 
@@ -444,6 +467,8 @@ class OperationalSpaceController(Controller):
                 desired_world_ori = np.dot(self.origin_ori, self.goal_ori)
             elif self.input_ref_frame == "world":
                 desired_world_ori = self.goal_ori
+            elif self.input_ref_frame == "right_base":
+                desired_world_ori = ee_T_world[:3,:3]
             else:
                 raise ValueError
             ori_error = orientation_error(desired_world_ori, self.ref_ori_mat)
@@ -489,7 +514,16 @@ class OperationalSpaceController(Controller):
             self.mass_matrix, nullspace_matrix, self.initial_joint, self.joint_pos, self.joint_vel
         )
 
-        # Always run superclass call for any cleanups at the end
+        # Clip torques to actuator limits
+        joint_min_limits = np.array([-2.7437, -1.7837, -2.9007, -3.0421, -2.8065, 0.5445, -3.0159])
+        joint_max_limits = np.array([2.743, 1.7837, 2.9007, -0.151, 2.8065, 4.5169, 3.0159])
+
+        safety_margin = 0.05  # Add a safety margin
+        joint_min_limits += safety_margin
+        joint_max_limits -= safety_margin
+        damping_factor = 0.1  # Small corrective force to apply when hitting limits
+
+        joint_positions = self.joint_pos + self.joint_vel * (1 / self.control_freq)  
         super().run_controller()
 
         return self.torques

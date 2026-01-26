@@ -138,6 +138,8 @@ def arm_controller_factory(name, params):
 
     if name == "JOINT_TORQUE":
         return generic.JointTorqueController(interpolator=interpolator, **params)
+    if name == "SIMPLE_POS":
+        return arm_controllers.SimplePosController(interpolator=interpolator, **params)
 
     raise ValueError("Unknown controller name: {}".format(name))
 

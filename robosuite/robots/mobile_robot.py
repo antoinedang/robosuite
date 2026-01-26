@@ -192,7 +192,7 @@ class MobileRobot(Robot):
         # First, run the superclass method to load the relevant model
         super().load_model()
 
-    def reset(self, deterministic=False, rng=None):
+    def reset(self, deterministic=False):
         """
         Sets initial pose of arm and grippers. Overrides gripper joint configuration if we're using a
         deterministic reset (e.g.: hard reset from xml file)
@@ -201,7 +201,7 @@ class MobileRobot(Robot):
             deterministic (bool): If true, will not randomize initializations within the sim
         """
         # First, run the superclass method to reset the position and controller
-        super().reset(deterministic, rng=rng)
+        super().reset(deterministic)
 
     def setup_references(self):
         """
@@ -311,13 +311,20 @@ class MobileRobot(Robot):
             return np.array(
                 self.sim.data.site_xpos[self.sim.model.site_name2id(self.robot_model.base.correct_naming("center"))]
             )
+        
+        @sensor(modality=modality)
+        def base_vel(obs_cache):
+            return np.array([
+                self.sim.data.qvel[self.sim.model.get_joint_qvel_addr(joint)]
+                for joint in self.robot_model.base_joints
+            ])
 
         @sensor(modality=modality)
         def base_quat(obs_cache):
             return T.mat2quat(self.sim.data.get_site_xmat(self.robot_model.base.correct_naming("center")))
 
-        sensors = [base_pos, base_quat]
-        names = ["base_pos", "base_quat"]
+        sensors = [base_pos, base_quat,base_vel]
+        names = ["base_pos", "base_quat","base_vel"]
 
         for arm in self.arms:
 

@@ -17,7 +17,7 @@ from robosuite.utils.buffers import DeltaBuffer, RingBuffer
 from robosuite.utils.log_utils import ROBOSUITE_DEFAULT_LOGGER
 from robosuite.utils.mjcf_utils import array_to_string
 from robosuite.utils.observables import Observable, sensor
-
+from scipy.spatial.transform import Rotation as R
 
 class Robot(object):
     """
@@ -60,7 +60,7 @@ class Robot(object):
         initialization_noise=None,
         base_type="default",
         gripper_type="default",
-        control_freq=20,
+        control_freq=10,
         lite_physics=True,
     ):
         self.arms = REGISTERED_ROBOTS[robot_type].arms
@@ -231,7 +231,7 @@ class Robot(object):
         """
         self.sim = sim
 
-    def reset(self, deterministic=False, rng=None):
+    def reset(self, deterministic=False):
         """
         Sets initial pose of arm and grippers. Overrides robot joint configuration if we're using a
         deterministic reset (e.g.: hard reset from xml file)
@@ -242,15 +242,14 @@ class Robot(object):
         Raises:
             ValueError: [Invalid noise type]
         """
-        if rng is None:
-            rng = np.random.default_rng()
         init_qpos = np.array(self.init_qpos)
+        # deterministic = True
         if not deterministic:
             # Determine noise
             if self.initialization_noise["type"] == "gaussian":
-                noise = rng.standard_normal(len(self.init_qpos)) * self.initialization_noise["magnitude"]
+                noise = np.random.randn(len(self.init_qpos)) * self.initialization_noise["magnitude"]
             elif self.initialization_noise["type"] == "uniform":
-                noise = rng.uniform(-1.0, 1.0, len(self.init_qpos)) * self.initialization_noise["magnitude"]
+                noise = np.random.uniform(-1.0, 1.0, len(self.init_qpos)) * self.initialization_noise["magnitude"]
             else:
                 raise ValueError("Error: Invalid noise type specified. Options are 'gaussian' or 'uniform'.")
             init_qpos += noise
@@ -358,14 +357,10 @@ class Robot(object):
         def joint_vel(obs_cache):
             return np.array([self.sim.data.qvel[x] for x in self._ref_joint_vel_indexes])
 
-        @sensor(modality=modality)
-        def joint_acc(obs_cache):
-            return np.array([self.sim.data.qacc[x] for x in self._ref_joint_vel_indexes])
-
-        sensors = [joint_pos, joint_pos_cos, joint_pos_sin, joint_vel, joint_acc]
-        names = ["joint_pos", "joint_pos_cos", "joint_pos_sin", "joint_vel", "joint_acc"]
+        sensors = [joint_pos, joint_pos_cos, joint_pos_sin, joint_vel]
+        names = ["joint_pos", "joint_pos_cos", "joint_pos_sin", "joint_vel"]
         # We don't want to include the direct joint pos sensor outputs
-        actives = [True, True, True, True, True]
+        actives = [True, True, True, True]
 
         for arm in self.arms:
             arm_sensors, arm_sensor_names = self._create_arm_sensors(arm, modality=modality)
@@ -390,6 +385,51 @@ class Robot(object):
             )
 
         return observables
+    def get_ee_T_arm_base(self,arm):
+        if arm == "right":
+            arm_base_T_world_pos = self.sim.data.get_site_xpos(f'robot0_{arm}_base_center')
+            arm_base_T_world_mat = self.sim.data.get_site_xmat(f'robot0_{arm}_base_center')
+        if arm == "left":
+            arm_base_T_world_pos = self.sim.data.get_site_xpos(f'robot0_{arm}_center')
+            arm_base_T_world_mat = self.sim.data.get_site_xmat(f'robot0_{arm}_center')
+
+        ee_T_world_pos = self.sim.data.get_body_xpos(f'robot0_{arm}_hand')        # shape (3,)
+        ee_T_world_mat = self.sim.data.get_body_xmat(f'robot0_{arm}_hand')
+
+        #   ee_T_world_pos = self.sim.data.get_site_xpos(f'gripper0_{arm}_grip_site')        # shape (3,)
+        # ee_T_world_mat = self.sim.data.get_site_xmat(f'gripper0_{arm}_grip_site')
+
+        ee_T_world = np.eye(4)
+        ee_T_world[:3, -1] = ee_T_world_pos
+        ee_T_world[:3, :3] = ee_T_world_mat
+
+        arm_base_T_world = np.eye(4)
+        arm_base_T_world[:3, -1] = arm_base_T_world_pos
+        arm_base_T_world[:3, :3] = arm_base_T_world_mat
+
+        ee_T_arm_base =np.linalg.inv(arm_base_T_world) @ ee_T_world
+        return ee_T_arm_base
+    def get_ee_site_T_arm_base(self, arm):
+        if arm == "right":
+            arm_base_T_world_pos = self.sim.data.get_site_xpos(f'robot0_{arm}_base_center')
+            arm_base_T_world_mat = self.sim.data.get_site_xmat(f'robot0_{arm}_base_center')
+        if arm == "left":
+            arm_base_T_world_pos = self.sim.data.get_site_xpos(f'robot0_{arm}_center')
+            arm_base_T_world_mat = self.sim.data.get_site_xmat(f'robot0_{arm}_center')
+
+        ee_T_world_pos = self.sim.data.get_site_xpos(f'gripper0_{arm}_grip_site')
+        ee_T_world_mat = self.sim.data.get_site_xmat(f'gripper0_{arm}_grip_site')
+
+        ee_T_world = np.eye(4)
+        ee_T_world[:3, -1] = ee_T_world_pos
+        ee_T_world[:3, :3] = ee_T_world_mat
+
+        arm_base_T_world = np.eye(4)
+        arm_base_T_world[:3, -1] = arm_base_T_world_pos
+        arm_base_T_world[:3, :3] = arm_base_T_world_mat
+
+        ee_T_arm_base =np.linalg.inv(arm_base_T_world) @ ee_T_world
+        return ee_T_arm_base
 
     def _create_arm_sensors(self, arm, modality):
         """
@@ -458,10 +498,94 @@ class Robot(object):
                 the orientation from the site, and then remove this eef_quat_site key.
             """
             return T.mat2quat(self.sim.data.site_xmat[self.eef_site_id[arm]].reshape((3, 3)))
+        
+        @sensor(modality=modality)
+        def eef_T_arm_base_quat_xyzw(obs_cache):
+            """
+            Args:
+                obs_cache (dict): A dictionary containing cached observations.
+
+            Returns:
+                numpy.ndarray: The quaternion representing the orientation of the end effector *site*
+                in the mujoco world coordinate frame.
+
+            Note:
+                In robosuite<=1.5, eef_quat_site has been queried from the body instead
+                of the site and has thus been inconsistent with the eef_pos, which queries from the site.
+
+                This inconsistency has been raised in issue https://github.com/ARISE-Initiative/robosuite/issues/298
+
+                Datasets collected with robosuite<=1.4 have use the eef_quat queried from the body, so we keep this key.
+                New datasets should ideally use the logic in eef_quat_site.
+
+                In a later robosuite release, we will directly update eef_quat to query
+                the orientation from the site, and then remove this eef_quat_site key.
+            """
+            eef_T_arm_base_quat = R.from_matrix(self.get_ee_T_arm_base(arm)[:3, :3]).as_quat()
+
+            return eef_T_arm_base_quat
+        @sensor(modality=modality)
+        def eef_T_arm_base_pos(obs_cache):
+            eef_T_arm_base_pos = (self.get_ee_T_arm_base(arm)[:3, -1])
+
+            return eef_T_arm_base_pos
+        # New sensors needed to add for transformation
+        @sensor(modality=modality)
+        def eef_site_T_arm_base_pose_mat(obs_cache):
+            return self.get_ee_site_T_arm_base(arm).flatten()
+
+        @sensor(modality=modality)
+        def mobilebase_T_world_pose_mat(obs_cache):
+            mobilebase_T_world = np.eye(4)
+            mobilebase_T_world[:3, -1] = self.sim.data.get_body_xpos('mobilebase0_base')
+            mobilebase_T_world[:3, :3] = self.sim.data.get_body_xmat('mobilebase0_base')
+            return mobilebase_T_world.flatten()
+
+        @sensor(modality=modality)
+        def arm_base_center_T_world_pose_mat(obs_cache):
+            arm_base_center_T_world = np.eye(4)
+            if arm == "right":
+                arm_base_center_T_world[:3, -1] = self.sim.data.get_site_xpos(f'robot0_{arm}_base_center')
+                arm_base_center_T_world[:3, :3] = self.sim.data.get_site_xmat(f'robot0_{arm}_base_center')
+            else:
+                arm_base_center_T_world[:3, -1] = self.sim.data.get_site_xpos(f'robot0_{arm}_center')
+                arm_base_center_T_world[:3, :3] = self.sim.data.get_site_xmat(f'robot0_{arm}_center')
+            return arm_base_center_T_world.flatten()
+
+        @sensor(modality=modality)
+        def grip_site_T_world_pose_mat(obs_cache):
+            grip_site_T_world = np.eye(4)
+            grip_site_T_world[:3, -1] = self.sim.data.get_site_xpos(f'gripper0_{arm}_grip_site')
+            grip_site_T_world[:3, :3] = self.sim.data.get_site_xmat(f'gripper0_{arm}_grip_site')
+            return grip_site_T_world.flatten()
+
+        @sensor(modality=modality)
+        def hand_T_world_pose_mat(obs_cache):
+            hand_T_world = np.eye(4)
+            hand_T_world[:3, -1] = self.sim.data.get_body_xpos(f'robot0_{arm}_hand')
+            hand_T_world[:3, :3] = self.sim.data.get_body_xmat(f'robot0_{arm}_hand')
+            return hand_T_world.flatten()
 
         # only consider prefix if there is more than one arm
         pf = f"{arm}_" if len(self.arms) > 1 else ""
 
+        # For murp
+        # sensors = [eef_pos, eef_quat, eef_quat_site, eef_T_arm_base_pos, eef_T_arm_base_quat_xyzw, \
+        #     eef_site_T_arm_base_pose_mat, \
+        #     mobilebase_T_world_pose_mat, \
+        #     arm_base_center_T_world_pose_mat, \
+        #     grip_site_T_world_pose_mat, \
+        #     hand_T_world_pose_mat, \
+        # ]
+        # names = [f"{pf}eef_pos", f"{pf}eef_quat", f"{pf}eef_quat_site", f"{pf}eef_T_{arm}_base_pos", f"{pf}eef_T_{arm}_base_quat_xyzw", \
+        #     f"{pf}eef_site_T_{arm}_base_pose_mat", \
+        #     f"{pf}mobilebase_T_world_pose_mat", \
+        #     f"{pf}arm_base_center_T_world_pose_mat", \
+        #     f"{pf}grip_site_T_world_pose_mat", \
+        #     f"{pf}hand_T_world_pose_mat", \
+        # ]
+
+        # for the normal robot
         sensors = [eef_pos, eef_quat, eef_quat_site]
         names = [f"{pf}eef_pos", f"{pf}eef_quat", f"{pf}eef_quat_site"]
 
@@ -475,7 +599,19 @@ class Robot(object):
             @sensor(modality=modality)
             def gripper_qvel(obs_cache):
                 return np.array([self.sim.data.qvel[x] for x in self._ref_gripper_joint_vel_indexes[arm]])
+            
+            @sensor(modality=modality)
+            def gripper_body_pose(obs_cache):
+                gripper_body_names = self.robot_model.grippers[f'robot0_{pf}hand'].sites
+                body_positions = []
+                for body_name in gripper_body_names:
+                    body_id = self.sim.model.site_name2id(body_name)
+                    body_pos = self.sim.data.site_xpos[body_id]  # position in world frame
+                    body_positions.append(body_pos.copy())
+                return np.concatenate(body_positions)
 
+            # sensors += [gripper_qpos, gripper_qvel, gripper_body_pose]
+            # names += [f"{pf}gripper_qpos", f"{pf}gripper_qvel", f"{pf}gripper_keypoint_pose"]
             sensors += [gripper_qpos, gripper_qvel]
             names += [f"{pf}gripper_qpos", f"{pf}gripper_qvel"]
 
@@ -872,7 +1008,8 @@ class Robot(object):
             #   policy (control) freq, and ndim (# joints)
             self.part_controller_config[arm]["robot_name"] = self.name
             self.part_controller_config[arm]["sim"] = self.sim
-            self.part_controller_config[arm]["ref_name"] = self.gripper[arm].important_sites["grip_site"]
+            # self.part_controller_config[arm]["ref_name"] = self.gripper[arm].important_sites["grip_site"]
+            self.part_controller_config[arm]["ref_name"] = f"robot0_{arm}_hand"
             self.part_controller_config[arm]["part_name"] = arm
             self.part_controller_config[arm]["naming_prefix"] = self.robot_model.naming_prefix
 
@@ -883,6 +1020,7 @@ class Robot(object):
             (start, end) = (None, self._joint_split_idx) if arm == "right" else (self._joint_split_idx, None)
             self.part_controller_config[arm]["joint_indexes"] = {
                 "joints": self.arm_joint_indexes[start:end],
+                "actuators": self._ref_joint_gripper_actuator_indexes[arm],
                 "qpos": self._ref_arm_joint_pos_indexes[start:end],
                 "qvel": self._ref_arm_joint_vel_indexes[start:end],
             }
@@ -914,7 +1052,7 @@ class Robot(object):
                 self.part_controller_config[gripper_name]["ndim"] = self.gripper[arm].dof
                 self.part_controller_config[gripper_name]["policy_freq"] = self.control_freq
                 self.part_controller_config[gripper_name]["joint_indexes"] = {
-                    "joints": self._ref_joints_indexes_dict[gripper_name],
+                    "joints": self.gripper_joints[arm],
                     "actuators": self._ref_joint_gripper_actuator_indexes[arm],
                     "qpos": self._ref_gripper_joint_pos_indexes[arm],
                     "qvel": self._ref_gripper_joint_vel_indexes[arm],

@@ -121,6 +121,7 @@ class JointPositionController(Controller):
         self.joint_indexes = joint_indexes
 
         # Control dimension
+        # self.control_dim = 6
         self.control_dim = len(joint_indexes["joints"])
 
         # input and output max and min (allow for either explicit lists or single numbers)
@@ -168,7 +169,10 @@ class JointPositionController(Controller):
         self.interpolator = interpolator
 
         self.input_type = input_type
-        assert self.input_type in ["delta", "absolute"], f"Input type must be delta or absolute, got: {self.input_type}"
+        assert self.input_type in [
+            "delta",
+            "absolute",
+        ], f"Input type must be delta or absolute, got: {self.input_type}"
         if self.input_type == "absolute":
             assert self.impedance_mode == "fixed", "Absolute input type is only supported for fixed impedance mode."
 
@@ -203,7 +207,11 @@ class JointPositionController(Controller):
             # Parse action based on the impedance mode, and update kp / kd as necessary
             jnt_dim = len(self.qpos_index)
             if self.impedance_mode == "variable":
-                damping_ratio, kp, delta = action[:jnt_dim], action[jnt_dim : 2 * jnt_dim], action[2 * jnt_dim :]
+                damping_ratio, kp, delta = (
+                    action[:jnt_dim],
+                    action[jnt_dim : 2 * jnt_dim],
+                    action[2 * jnt_dim :],
+                )
                 self.kp = np.clip(kp, self.kp_min, self.kp_max)
                 self.kd = 2 * np.sqrt(self.kp) * np.clip(damping_ratio, self.damping_ratio_min, self.damping_ratio_max)
             elif self.impedance_mode == "variable_kp":
@@ -212,9 +220,12 @@ class JointPositionController(Controller):
                 self.kd = 2 * np.sqrt(self.kp)  # critically damped
             else:  # This is case "fixed"
                 delta = action
-
             # Check to make sure delta is size self.joint_dim
-            assert len(delta) == jnt_dim, "Delta qpos must be equal to the robot's joint dimension space!"
+            if len(delta) != jnt_dim:
+                breakpoint()
+            assert (
+                len(delta) == jnt_dim
+            ), f"Delta qpos must be equal to the robot's joint dimension space!len is :{len(delta)},jnt_dim is {jnt_dim}"
 
             if delta is not None:
                 scaled_delta = self.scale_action(delta)
@@ -222,7 +233,10 @@ class JointPositionController(Controller):
                 scaled_delta = None
 
             self.goal_qpos = set_goal_position(
-                scaled_delta, self.joint_pos, position_limit=self.position_limits, set_pos=set_qpos
+                scaled_delta,
+                self.joint_pos,
+                position_limit=self.position_limits,
+                set_pos=set_qpos,
             )
         elif self.input_type == "absolute":
             self.goal_qpos = action
